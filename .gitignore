@@ -1,0 +1,35 @@
+*.pyc
+*~
+*.iml
+.idea/
+.project
+.pydevproject
+.ropeproject/
+.settings/
+.vscode
+
+.pybuild/
+build
+dist/
+frontik.egg-info/
+.eggs/
+.pytest_cache/
+
+*.log
+*.slog
+.coverage*
+!.coveragerc
+.tox/
+/tests/temp/
+
+# OS X junk
+.AppleDouble
+.DS_Store
+Icon?
+.Spotlight-V100
+.Trashes
+
+# Windows junk
+ehthumbs.db
+Thumbs.db
+Desktop.ini
