@@ -18,7 +18,7 @@ class TestHook(test):
 
 setup(
     name='balancing-http-client',
-    version='1.0.0',
+    version='1.0.1',
     description='Balancing http client for tornado',
     url='https://github.com/hhru/balancing-http-client',
     cmdclass={
@@ -30,6 +30,7 @@ setup(
     python_requires='>=3.6',
     install_requires=[
         'tornado >= 5.0',
+        'pycurl >= 7.43.0',
         'lxml >= 3.5.0',
     ],
     test_suite='tests',
