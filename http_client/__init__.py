@@ -15,26 +15,12 @@ from tornado.ioloop import IOLoop
 from tornado.curl_httpclient import CurlAsyncHTTPClient
 from tornado.httpclient import HTTPRequest, HTTPResponse, HTTPError
 from tornado.httputil import HTTPHeaders
-from tornado.options import options, define
+from tornado.options import options as tornado_options
 
+import http_client.options
 from http_client.util import make_url, make_body, make_mfd, response_from_debug
 
 USER_AGENT_HEADER = 'User-Agent'
-
-
-define('datacenter', default=None, type=str)
-
-define('timeout_multiplier', default=1.0, type=float)
-define('http_client_default_connect_timeout_sec', default=0.2, type=float)
-define('http_client_default_request_timeout_sec', default=2.0, type=float)
-define('http_client_default_max_tries', default=2, type=int)
-define('http_client_default_max_timeout_tries', default=1, type=int)
-define('http_client_default_max_fails', default=0, type=int)
-define('http_client_default_fail_timeout_sec', default=10, type=float)
-define('http_client_default_retry_policy', default='timeout,http_503', type=str)
-define('http_proxy_host', default=None, type=str)
-define('http_proxy_port', default=3128, type=int)
-define('http_client_allow_cross_datacenter_requests', default=False, type=bool)
 
 
 def HTTPResponse__repr__(self):
@@ -155,7 +141,7 @@ class Upstream:
         min_index = None
         min_weights = None
         should_rescale_local_dc = True
-        should_rescale_remote_dc = options.http_client_allow_cross_datacenter_requests
+        should_rescale_remote_dc = tornado_options.http_client_allow_cross_datacenter_requests
 
         if exclude is not None:
             tried_racks = {self.servers[index].rack for index in exclude if self.servers[index] is not None}
@@ -166,9 +152,9 @@ class Upstream:
             if server is None or not server.is_active:
                 continue
 
-            is_different_datacenter = server.datacenter != options.datacenter
+            is_different_datacenter = server.datacenter != tornado_options.datacenter
 
-            if is_different_datacenter and not options.http_client_allow_cross_datacenter_requests:
+            if is_different_datacenter and not tornado_options.http_client_allow_cross_datacenter_requests:
                 continue
 
             should_rescale = server.requests >= server.weight
@@ -198,7 +184,7 @@ class Upstream:
         if should_rescale_local_dc or should_rescale_remote_dc:
             for server in self.servers:
                 if server is not None and server.is_active:
-                    is_same_dc = server.datacenter == options.datacenter
+                    is_same_dc = server.datacenter == tornado_options.datacenter
                     if (should_rescale_local_dc and is_same_dc) or (should_rescale_remote_dc and not is_same_dc):
                         server.requests -= server.weight
 
@@ -244,12 +230,12 @@ class Upstream:
         if not servers:
             raise ValueError('server list should not be empty')
 
-        self.max_tries = int(config.get('max_tries', options.http_client_default_max_tries))
-        self.max_fails = int(config.get('max_fails', options.http_client_default_max_fails))
-        self.fail_timeout = float(config.get('fail_timeout_sec', options.http_client_default_fail_timeout_sec))
-        self.max_timeout_tries = int(config.get('max_timeout_tries', options.http_client_default_max_timeout_tries))
-        self.connect_timeout = float(config.get('connect_timeout_sec', options.http_client_default_connect_timeout_sec))
-        self.request_timeout = float(config.get('request_timeout_sec', options.http_client_default_request_timeout_sec))
+        self.max_tries = int(config.get('max_tries', tornado_options.http_client_default_max_tries))
+        self.max_fails = int(config.get('max_fails', tornado_options.http_client_default_max_fails))
+        self.fail_timeout = float(config.get('fail_timeout_sec', tornado_options.http_client_default_fail_timeout_sec))
+        self.max_timeout_tries = int(config.get('max_timeout_tries', tornado_options.http_client_default_max_timeout_tries))
+        self.connect_timeout = float(config.get('connect_timeout_sec', tornado_options.http_client_default_connect_timeout_sec))
+        self.request_timeout = float(config.get('request_timeout_sec', tornado_options.http_client_default_request_timeout_sec))
 
         slow_start_interval = float(config.get('slow_start_interval_sec', 0))
         slow_start_requests = int(config.get('slow_start_requests', 0))
@@ -258,7 +244,7 @@ class Upstream:
         if slow_start_interval != 0 or slow_start_requests != 0:
             self.get_join_strategy = partial(DelayedSlowStartJoinStrategy, slow_start_interval, slow_start_requests)
 
-        self.retry_policy = RetryPolicy(config.get('retry_policy', options.http_client_default_retry_policy))
+        self.retry_policy = RetryPolicy(config.get('retry_policy', tornado_options.http_client_default_retry_policy))
 
         mapping = {server.address: server for server in servers}
 
@@ -357,7 +343,7 @@ class BalancedHttpRequest:
         self.last_request = None
 
         if request_timeout is not None and max_timeout_tries is None:
-            max_timeout_tries = options.http_client_default_max_timeout_tries
+            max_timeout_tries = tornado_options.http_client_default_max_timeout_tries
 
         if self.connect_timeout is None:
             self.connect_timeout = self.upstream.connect_timeout
@@ -366,8 +352,8 @@ class BalancedHttpRequest:
         if max_timeout_tries is None:
             max_timeout_tries = self.upstream.max_timeout_tries
 
-        self.connect_timeout *= options.timeout_multiplier
-        self.request_timeout *= options.timeout_multiplier
+        self.connect_timeout *= tornado_options.timeout_multiplier
+        self.request_timeout *= tornado_options.timeout_multiplier
 
         self.headers = HTTPHeaders() if headers is None else HTTPHeaders(headers)
         if self.source_app and not self.headers.get(USER_AGENT_HEADER):
@@ -416,9 +402,9 @@ class BalancedHttpRequest:
             request_timeout=self.request_timeout,
         )
 
-        if options.http_proxy_host is not None:
-            request.proxy_host = options.http_proxy_host
-            request.proxy_port = options.http_proxy_port
+        if tornado_options.http_proxy_host is not None:
+            request.proxy_host = tornado_options.http_proxy_host
+            request.proxy_port = tornado_options.http_proxy_port
 
         self.last_request = request
         return self.last_request
@@ -715,14 +701,14 @@ class HttpClient:
             self.statsd_client.flush()
 
         if self.kafka_producer is not None and not do_retry:
-            dc = balanced_request.current_datacenter or options.datacenter or 'unknown'
+            dc = balanced_request.current_datacenter or tornado_options.datacenter or 'unknown'
             current_host = balanced_request.current_host or 'unknown'
             request_id = balanced_request.headers.get('X-Request-Id', 'unknown')
             upstream = balanced_request.get_host() or 'unknown'
 
             asyncio.get_event_loop().create_task(self.kafka_producer.send(
                 'metrics_requests',
-                utf8(f'{{"app":"{options.app}","dc":"{dc}","hostname":"{current_host}","requestId":"{request_id}",'
+                utf8(f'{{"app":"{tornado_options.app}","dc":"{dc}","hostname":"{current_host}","requestId":"{request_id}",'
                      f'"status":{response.code},"ts":{int(time.time())},"upstream":"{upstream}"}}')
             ))
 
