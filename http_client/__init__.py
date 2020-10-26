@@ -254,7 +254,7 @@ class Upstream:
 
         slow_start_interval = float(config.get('slow_start_interval_sec', 0))
 
-        self.get_join_strategy = lambda: DefaultJoinStrategy
+        self.get_join_strategy = lambda: None
         if slow_start_interval != 0:
             self.get_join_strategy = partial(DelayedSlowStartJoinStrategy, slow_start_interval)
 
@@ -291,19 +291,6 @@ class Upstream:
 
     def __str__(self):
         return '[{}]'.format(','.join(server.address for server in self.servers if server is not None))
-
-
-class DefaultJoinStrategy:
-    @staticmethod
-    def is_complete():
-        return True
-
-    @staticmethod
-    def can_handle_request(server):
-        return True
-
-    def __repr__(self):
-        return '<DefaultJoinStrategy>'
 
 
 class DelayedSlowStartJoinStrategy:
