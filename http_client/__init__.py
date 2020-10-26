@@ -207,13 +207,14 @@ class Upstream:
         server.current_requests += 1
 
         if server.join_strategy is not None:
-            server.join_strategy.handle_request()
-
             if server.join_strategy.is_complete():
+                http_client_logger.info('slow start finished for %s upstream: %s', server.address, self.name)
                 max_load = max(server.requests / float(server.weight) for server in self.servers
                                if server is not None and server.is_active)
                 server.requests = int(server.weight * max_load)
                 server.join_strategy = None
+            else:
+                http_client_logger.info('request to %s during slow start, upstream: %s', server.address, self.name)
 
         return min_index, server.address, server.rack, server.datacenter
 
@@ -252,11 +253,10 @@ class Upstream:
         self.request_timeout = float(config.get('request_timeout_sec', options.http_client_default_request_timeout_sec))
 
         slow_start_interval = float(config.get('slow_start_interval_sec', 0))
-        slow_start_requests = int(config.get('slow_start_requests', 0))
 
         self.get_join_strategy = lambda: DefaultJoinStrategy
-        if slow_start_interval != 0 or slow_start_requests != 0:
-            self.get_join_strategy = partial(DelayedSlowStartJoinStrategy, slow_start_interval, slow_start_requests)
+        if slow_start_interval != 0:
+            self.get_join_strategy = partial(DelayedSlowStartJoinStrategy, slow_start_interval)
 
         self.retry_policy = RetryPolicy(config.get('retry_policy', options.http_client_default_retry_policy))
 
@@ -302,21 +302,16 @@ class DefaultJoinStrategy:
     def can_handle_request(server):
         return True
 
-    @staticmethod
-    def handle_request():
-        pass
-
     def __repr__(self):
         return '<DefaultJoinStrategy>'
 
 
 class DelayedSlowStartJoinStrategy:
-    def __init__(self, slow_start_interval, slow_start_requests):
+    def __init__(self, slow_start_interval):
         self.initial_delay_end_time = time.time() + random() * slow_start_interval
-        self.slow_start_requests = slow_start_requests
 
     def is_complete(self):
-        return time.time() > self.initial_delay_end_time and self.slow_start_requests <= 0
+        return time.time() > self.initial_delay_end_time
 
     def can_handle_request(self, server):
         if server.current_requests > 0:
@@ -327,13 +322,10 @@ class DelayedSlowStartJoinStrategy:
 
         return True
 
-    def handle_request(self):
-        self.slow_start_requests -= 1
-
     def __repr__(self):
         return (
             '<DelayedSlowStartJoinStrategy('
-            f'initial_delay_end_time={self.initial_delay_end_time}, slow_start_requests={self.slow_start_requests}'
+            f'initial_delay_end_time={self.initial_delay_end_time}'
             ')>'
         )
 
