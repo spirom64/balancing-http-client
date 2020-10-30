@@ -37,6 +37,7 @@ setup(
     tests_require=[
         'pytest <= 3.8.2',
         'pycodestyle == 2.5.0',
+        'tornado >= 5.0,  < 5.1',
     ],
     zip_safe=False
 )
