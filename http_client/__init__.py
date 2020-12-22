@@ -3,9 +3,11 @@ import json
 import re
 import time
 from asyncio import Future
+from dataclasses import dataclass
 
 from functools import partial
 from random import shuffle, random
+from urllib.parse import urlparse
 
 import pycurl
 import logging
@@ -317,6 +319,16 @@ class DelayedSlowStartJoinStrategy:
         )
 
 
+@dataclass(repr=False, frozen=True)
+class TraceFrame:
+    address: str
+    responseCode: int
+    msg: str
+
+    def __repr__(self) -> str:
+        return f'{self.address}~{self.responseCode}~{self.msg}'
+
+
 class BalancedHttpRequest:
     def __init__(self, host: str, upstream: Upstream, source_app: str, uri: str, name: str,
                  method='GET', data=None, headers=None, files=None, content_type=None,
@@ -334,6 +346,7 @@ class BalancedHttpRequest:
         self.body = None
         self.first_status = None
         self.last_request = None
+        self.trace = []
 
         if request_timeout is not None and max_timeout_tries is None:
             max_timeout_tries = options.http_client_default_max_timeout_tries
@@ -411,6 +424,7 @@ class BalancedHttpRequest:
     def check_retry(self, response):
         self.tries_left -= 1
         self.request_time_left -= response.request_time
+        self.trace.append(TraceFrame(urlparse(response.effective_url).hostname, response.code, str(response.error)))
 
         if self.upstream.balanced:
             do_retry, error = self.upstream.retry_policy.check_retry(response, self.idempotent)
@@ -438,6 +452,9 @@ class BalancedHttpRequest:
 
     def get_retries_count(self):
         return len(self.tried_hosts) if self.tried_hosts else 0
+
+    def get_url(self):
+        return f'http://{self.get_host()}{self.uri}'
 
 
 class HttpClientFactory:
@@ -664,12 +681,20 @@ class HttpClient:
 
     def _log_response(self, balanced_request, response, retries_count, do_retry, debug_extra):
         size = f' {len(response.body)} bytes' if response.body is not None else ''
-        retry = f' on retry {retries_count}' if retries_count > 0 else ''
-        retry_mark = 'will retry' if do_retry else 'retries finished'
-        log_message = f'HTTP_CLIENT_RESPONSE: {response.code} got {size}{retry}, {retry_mark} ' \
-                      f'{balanced_request.method} {response.effective_url} in {response.request_time * 1000:.2f}ms'
+        is_server_error = response.code >= 500
+        if do_retry:
+            retry = f' on retry {retries_count}' if retries_count > 0 else ''
+            log_message = f'balanced_request_response: {response.code} got {size}{retry}, will retry ' \
+                          f'{balanced_request.method} {response.effective_url} in {response.request_time * 1000:.2f}ms'
+            log_method = http_client_logger.info if is_server_error else http_client_logger.debug
+        else:
+            msg_label = 'balanced_request_final_error' if is_server_error else 'balanced_request_final_response'
+            log_message = f'{msg_label}: {response.code} got {size}' \
+                          f'{balanced_request.method} {balanced_request.get_url()}, ' \
+                          f'trace: {"->".join([str(frame) for frame in balanced_request.trace])}'
 
-        log_method = http_client_logger.warning if response.code >= 500 else http_client_logger.info
+            log_method = http_client_logger.warning if is_server_error else http_client_logger.info
+
         log_method(log_message, extra=debug_extra)
 
         if response.code == 599:
