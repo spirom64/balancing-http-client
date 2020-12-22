@@ -11,7 +11,7 @@
 .pybuild/
 build
 dist/
-frontik.egg-info/
+*.egg-info/
 .eggs/
 .pytest_cache/
 
