@@ -3,6 +3,7 @@ import json
 import re
 import time
 from asyncio import Future
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from functools import partial
@@ -319,14 +320,10 @@ class DelayedSlowStartJoinStrategy:
         )
 
 
-@dataclass(repr=False, frozen=True)
-class TraceFrame:
-    address: str
+@dataclass(frozen=True)
+class ResponseData:
     responseCode: int
     msg: str
-
-    def __repr__(self) -> str:
-        return f'{self.address}~{self.responseCode}~{self.msg}'
 
 
 class BalancedHttpRequest:
@@ -344,9 +341,7 @@ class BalancedHttpRequest:
         self.follow_redirects = follow_redirects
         self.idempotent = idempotent
         self.body = None
-        self.first_status = None
         self.last_request = None
-        self.trace = []
 
         if request_timeout is not None and max_timeout_tries is None:
             max_timeout_tries = options.http_client_default_max_timeout_tries
@@ -381,9 +376,8 @@ class BalancedHttpRequest:
 
         if content_type is not None:
             self.headers['Content-Type'] = content_type
-        self.tries_left = self.upstream.max_tries
         self.request_time_left = self.request_timeout * max_timeout_tries
-        self.tried_hosts = None
+        self.tries = OrderedDict()
         self.current_host = host.rstrip('/')
         self.current_server_index = None
         self.current_rack = None
@@ -391,7 +385,7 @@ class BalancedHttpRequest:
 
     def make_request(self):
         if self.upstream.balanced:
-            index, host, rack, datacenter = self.upstream.borrow_server(self.tried_hosts)
+            index, host, rack, datacenter = self.upstream.borrow_server(self.tries.keys() if self.tries else None)
 
             self.current_server_index = index
             self.current_host = host
@@ -422,9 +416,7 @@ class BalancedHttpRequest:
         return self.upstream.name if self.upstream.balanced else self.current_host
 
     def check_retry(self, response):
-        self.tries_left -= 1
         self.request_time_left -= response.request_time
-        self.trace.append(TraceFrame(urlparse(response.effective_url).hostname, response.code, str(response.error)))
 
         if self.upstream.balanced:
             do_retry, error = self.upstream.retry_policy.check_retry(response, self.idempotent)
@@ -434,15 +426,7 @@ class BalancedHttpRequest:
         else:
             do_retry, error = False, False
 
-        do_retry = do_retry and self.tries_left > 0 and self.request_time_left > 0
-
-        if do_retry:
-            if self.tried_hosts is None:
-                self.first_status = response.code
-                self.tried_hosts = set()
-
-            self.tried_hosts.add(self.current_server_index)
-
+        do_retry = do_retry and self.upstream.max_tries > len(self.tries) and self.request_time_left > 0
         return do_retry
 
     def pop_last_request(self):
@@ -450,11 +434,14 @@ class BalancedHttpRequest:
         self.last_request = None
         return request
 
-    def get_retries_count(self):
-        return len(self.tried_hosts) if self.tried_hosts else 0
+    def register_try(self, response):
+        self.tries[self.current_server_index] = ResponseData(response.code, str(response.error))
 
     def get_url(self):
         return f'http://{self.get_host()}{self.uri}'
+
+    def get_trace(self):
+        '->'.join([f'{self.upstream.servers[index].address}~{data.responseCode}~{data.msg}' for index, data in self.tries.items()])
 
 
 class HttpClientFactory:
@@ -584,13 +571,13 @@ class HttpClient:
         future = Future()
 
         def request_finished_callback(response):
-            if balanced_request.tried_hosts is not None and self.statsd_client is not None:
+            if self.statsd_client is not None and len(balanced_request.tries) > 1:
                 self.statsd_client.count(
                     'http.client.retries', 1,
                     upstream=balanced_request.get_host(),
                     dc=balanced_request.current_datacenter,
-                    first_status=balanced_request.first_status,
-                    tries=len(balanced_request.tried_hosts),
+                    first_status=next(iter(balanced_request.tries.values())).responseCode,
+                    tries=len(balanced_request.tries),
                     status=response.code
                 )
 
@@ -611,9 +598,10 @@ class HttpClient:
                 return
 
             request = balanced_request.pop_last_request()
-            retries_count = balanced_request.get_retries_count()
+            retries_count = len(balanced_request.tries)
 
             response, debug_extra = self._unwrap_debug(balanced_request, request, response, retries_count)
+            balanced_request.register_try(response)
             do_retry = balanced_request.check_retry(response)
 
             self._log_response(balanced_request, response, retries_count, do_retry, debug_extra)
@@ -691,7 +679,7 @@ class HttpClient:
             msg_label = 'balanced_request_final_error' if is_server_error else 'balanced_request_final_response'
             log_message = f'{msg_label}: {response.code} got {size}' \
                           f'{balanced_request.method} {balanced_request.get_url()}, ' \
-                          f'trace: {"->".join([str(frame) for frame in balanced_request.trace])}'
+                          f'trace: {balanced_request.get_trace()}'
 
             log_method = http_client_logger.warning if is_server_error else http_client_logger.info
 
