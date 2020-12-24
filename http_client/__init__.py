@@ -393,7 +393,7 @@ class BalancedHttpRequest:
             self.current_datacenter = datacenter
 
         request = HTTPRequest(
-            url=(self.current_host if self.backend_available() else self.upstream.name) + self.uri,
+            url=(self.get_calling_address()) + self.uri,
             body=self.body,
             method=self.method,
             headers=self.headers,
@@ -411,6 +411,9 @@ class BalancedHttpRequest:
 
     def backend_available(self):
         return self.current_host is not None
+
+    def get_calling_address(self):
+        return self.current_host if self.backend_available() else self.upstream.name
 
     def get_host(self):
         return self.upstream.name if self.upstream.balanced else self.current_host
@@ -435,7 +438,8 @@ class BalancedHttpRequest:
         return request
 
     def register_try(self, response):
-        self.tries[self.current_server_index] = ResponseData(response.code, str(response.error))
+        index = self.current_server_index if self.current_server_index else len(self.tries)
+        self.tries[index] = ResponseData(response.code, str(response.error))
 
     @staticmethod
     def get_url(request):
@@ -443,8 +447,15 @@ class BalancedHttpRequest:
 
     @staticmethod
     def get_trace(request):
-        '->'.join([f'{request.upstream.servers[index].address}~{data.responseCode}~{data.msg}'
-                   for index, data in request.tries.items()])
+        def _get_server_address(index):
+            if request.upstream.balanced:
+                if index < len(request.upstream.servers) and request.upstream.servers[index]:
+                    return request.upstream.servers[index].address
+                return f'no_idx_{index}_in_upstream'
+            return request.get_calling_address()
+
+        return '->'.join([f'{_get_server_address(index)}~{data.responseCode}~{data.msg}'
+                          for index, data in request.tries.items()])
 
 
 class HttpClientFactory:
