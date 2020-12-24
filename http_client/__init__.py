@@ -437,11 +437,14 @@ class BalancedHttpRequest:
     def register_try(self, response):
         self.tries[self.current_server_index] = ResponseData(response.code, str(response.error))
 
-    def get_url(self):
-        return f'http://{self.get_host()}{self.uri}'
+    @staticmethod
+    def get_url(request):
+        return f'http://{request.get_host()}{request.uri}'
 
-    def get_trace(self):
-        '->'.join([f'{self.upstream.servers[index].address}~{data.responseCode}~{data.msg}' for index, data in self.tries.items()])
+    @staticmethod
+    def get_trace(request):
+        '->'.join([f'{request.upstream.servers[index].address}~{data.responseCode}~{data.msg}'
+                   for index, data in request.tries.items()])
 
 
 class HttpClientFactory:
@@ -678,8 +681,8 @@ class HttpClient:
         else:
             msg_label = 'balanced_request_final_error' if is_server_error else 'balanced_request_final_response'
             log_message = f'{msg_label}: {response.code} got {size}' \
-                          f'{balanced_request.method} {balanced_request.get_url()}, ' \
-                          f'trace: {balanced_request.get_trace()}'
+                          f'{balanced_request.method} {BalancedHttpRequest.get_url(balanced_request)}, ' \
+                          f'trace: {BalancedHttpRequest.get_trace(balanced_request)}'
 
             log_method = http_client_logger.warning if is_server_error else http_client_logger.info
 
