@@ -454,8 +454,8 @@ class BalancedHttpRequest:
                 return f'no_idx_{index}_in_upstream'
             return request.get_calling_address()
 
-        return '->'.join([f'{_get_server_address(index)}~{data.responseCode}~{data.msg}'
-                          for index, data in request.tries.items()])
+        return ' -> '.join([f'{_get_server_address(index)}~{data.responseCode}~{data.msg}'
+                           for index, data in request.tries.items()])
 
 
 class HttpClientFactory:
