@@ -27,41 +27,37 @@ class TestHttpClientBalancer(unittest.TestCase):
         upstream = self._upstream(servers)
 
         servers.append(Server('3', 1))
-        upstream.update({}, servers)
+        upstream.update(upstream)
 
         self.assertEqual(len(upstream.servers), 3)
         self.assertEqual(_total_weight(upstream), 3)
 
-    def test_remove_server(self):
-        upstream = self._upstream([Server('1', 1), Server('2', 1)])
-        upstream.update({}, [Server('1', 1)])
-
-        self.assertEqual(len(upstream.servers), 2)
-        self.assertEqual(len([server for server in upstream.servers if server is not None]), 1)
-        self.assertEqual(_total_weight(upstream), 1)
-
     def test_replace_server(self):
         upstream = self._upstream([Server('1', 1), Server('2', 1)])
-        upstream.update({}, [Server('1', 2), Server('2', 5)])
+        upstream2 = self._upstream([Server('1', 2), Server('2', 5)])
+        upstream.update(upstream2)
 
         self.assertEqual(len(upstream.servers), 2)
         self.assertEqual(_total_weight(upstream), 7)
 
     def test_remove_add_server(self):
         upstream = self._upstream([Server('1', 1), Server('2', 1)])
-        upstream.update({}, [Server('2', 2), Server('3', 5)])
+        upstream2 = self._upstream([Server('2', 2), Server('3', 5)])
+        upstream.update(upstream2)
 
         self.assertEqual(len(upstream.servers), 2)
         self.assertEqual(_total_weight(upstream), 7)
 
     def test_remove_add_server_one_by_one(self):
         upstream = self._upstream([Server('1', 1), Server('2', 1)])
-        upstream.update({}, [Server('2', 1)])
+        upstream2 = self._upstream([Server('2', 1)])
+        upstream.update(upstream2)
 
         self.assertEqual(len(upstream.servers), 2)
         self.assertEqual(_total_weight(upstream), 1)
 
-        upstream.update({}, [Server('2', 1), Server('3', 10)])
+        upstream2 = self._upstream([Server('2', 1), Server('3', 10)])
+        upstream.update(upstream2)
 
         self.assertEqual(len(upstream.servers), 2)
         self.assertEqual(_total_weight(upstream), 11)
@@ -112,7 +108,8 @@ class TestHttpClientBalancer(unittest.TestCase):
         self.assertEqual(address, '2')
 
         server = Server('3', 1)
-        upstream.update({}, [Server('1', 1), server])
+        upstream2 = self._upstream([Server('1', 1), server])
+        upstream.update(upstream2)
 
         self.assertEqual(_total_requests(upstream), 1)
 

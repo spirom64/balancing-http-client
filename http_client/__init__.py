@@ -1,14 +1,13 @@
+import abc
 import asyncio
 import json
 import re
 import time
 from asyncio import Future
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
-
 from functools import partial
-from random import shuffle, random
-from urllib.parse import urlparse
+from random import random
 
 import pycurl
 import logging
@@ -18,26 +17,13 @@ from tornado.ioloop import IOLoop
 from tornado.curl_httpclient import CurlAsyncHTTPClient
 from tornado.httpclient import HTTPRequest, HTTPResponse, HTTPError
 from tornado.httputil import HTTPHeaders
-from tornado.options import options, define
+from typing import Dict
+
+from http_client.options import options
 
 from http_client.util import make_url, make_body, make_mfd, response_from_debug
 
 USER_AGENT_HEADER = 'User-Agent'
-
-
-define('datacenter', default=None, type=str)
-
-define('timeout_multiplier', default=1.0, type=float)
-define('http_client_default_connect_timeout_sec', default=0.2, type=float)
-define('http_client_default_request_timeout_sec', default=2.0, type=float)
-define('http_client_default_max_tries', default=2, type=int)
-define('http_client_default_max_timeout_tries', default=1, type=int)
-define('http_client_default_max_fails', default=0, type=int)
-define('http_client_default_fail_timeout_sec', default=10, type=float)
-define('http_client_default_retry_policy', default='timeout,http_503', type=str)
-define('http_proxy_host', default=None, type=str)
-define('http_proxy_port', default=3128, type=int)
-define('http_client_allow_cross_datacenter_requests', default=False, type=bool)
 
 
 def HTTPResponse__repr__(self):
@@ -51,11 +37,6 @@ def HTTPResponse__repr__(self):
 
 HTTPResponse.__repr__ = HTTPResponse__repr__
 
-
-def _string_to_dict(s):
-    return {name: value for (name, value) in (v.split('=') for v in s.split(' ') if v)}
-
-
 http_client_logger = logging.getLogger('http_client')
 
 
@@ -65,10 +46,6 @@ class FailFastError(Exception):
 
 
 class Server:
-    @classmethod
-    def from_config(cls, properties):
-        params = {key: properties[key] for key in ('weight', 'rack', 'dc') if key in properties}
-        return cls(properties.get('server'), **params)
 
     def __init__(self, address, weight=1, rack=None, dc=None):
         self.address = address.rstrip('/')
@@ -79,7 +56,6 @@ class Server:
         self.current_requests = 0
         self.fails = 0
         self.requests = 0
-        self.is_active = True
         self.join_strategy = None
 
         if self.weight < 1:
@@ -94,25 +70,19 @@ class Server:
         self.rack = server.rack
         self.datacenter = server.datacenter
 
-    def disable(self):
-        self.is_active = False
-
-    def restore(self, join_strategy):
-        self.fails = 0
-        self.requests = 0
-        self.is_active = True
-        self.join_strategy = join_strategy
+    def __str__(self) -> str:
+        return f'{{address={self.address}, weight={self.weight}, dc={self.datacenter}}}'
 
 
 class RetryPolicy:
-    _mapping = {
-        'timeout': (599, False),
-        'http_503': (503, False),
-        'non_idempotent_503': (503, True),
-    }
 
     def __init__(self, properties):
-        self.statuses = dict(RetryPolicy._mapping.get(policy) for policy in properties.split(','))
+        self.statuses = {}
+        if properties:
+            for statuses in properties.items():
+                self.statuses[int(statuses[0])] = bool(statuses[1].get('idempotent', False))
+        else:
+            self.statuses = options.http_client_default_retry_policy
 
     def check_retry(self, response, idempotent):
         if response.code == 599:
@@ -138,21 +108,24 @@ class Upstream:
         cls._single_host_upstream.balanced = False
         return cls._single_host_upstream
 
-    @staticmethod
-    def parse_config(config):
-        configs = [_string_to_dict(v) for v in config.split('|')]
-
-        upstream_config = configs.pop(0)
-        servers = [Server.from_config(server_config) for server_config in configs if server_config]
-
-        return upstream_config, servers
-
     def __init__(self, name, config, servers):
         self.name = name
-        self.servers = []
+        self.servers = servers
         self.balanced = True
+        self.max_tries = int(config.get('max_tries', options.http_client_default_max_tries))
+        self.max_fails = int(config.get('max_fails', options.http_client_default_max_fails))
+        self.fail_timeout = float(config.get('fail_timeout_sec', options.http_client_default_fail_timeout_sec))
+        self.max_timeout_tries = int(config.get('max_timeout_tries', options.http_client_default_max_timeout_tries))
+        self.connect_timeout = float(config.get('connect_timeout_sec', options.http_client_default_connect_timeout_sec))
+        self.request_timeout = float(config.get('request_timeout_sec', options.http_client_default_request_timeout_sec))
 
-        self.update(config, servers)
+        self.slow_start_interval = float(config.get('slow_start_interval_sec', 0))
+
+        self.join_strategy = None
+        if self.slow_start_interval != 0:
+            self.join_strategy = DelayedSlowStartJoinStrategy(self.slow_start_interval)
+
+        self.retry_policy = RetryPolicy(config.get('retry_policy', {}))
 
     def borrow_server(self, exclude=None):
         min_index = None
@@ -166,7 +139,7 @@ class Upstream:
             tried_racks = None
 
         for index, server in enumerate(self.servers):
-            if server is None or not server.is_active:
+            if server is None:
                 continue
 
             is_different_datacenter = server.datacenter != options.datacenter
@@ -200,7 +173,7 @@ class Upstream:
 
         if should_rescale_local_dc or should_rescale_remote_dc:
             for server in self.servers:
-                if server is not None and server.is_active:
+                if server is not None:
                     is_same_dc = server.datacenter == options.datacenter
                     if (should_rescale_local_dc and is_same_dc) or (should_rescale_remote_dc and not is_same_dc):
                         server.requests -= server.weight
@@ -213,7 +186,7 @@ class Upstream:
             if server.join_strategy.is_complete():
                 http_client_logger.info('slow start finished for %s upstream: %s', server.address, self.name)
                 max_load = max(server.requests / float(server.weight) for server in self.servers
-                               if server is not None and server.is_active)
+                               if server is not None)
                 server.requests = int(server.weight * max_load)
                 server.join_strategy = None
             else:
@@ -229,39 +202,26 @@ class Upstream:
 
             if error:
                 server.fails += 1
-
-                if self.max_fails != 0 and server.fails >= self.max_fails:
-                    self._disable_server(server)
             else:
                 server.fails = 0
 
-    def _disable_server(self, server):
-        http_client_logger.info('disabling server %s for upstream %s', server.address, self.name)
-        server.disable()
-        IOLoop.current().add_timeout(IOLoop.current().time() + self.fail_timeout, partial(self._restore_server, server))
+    def update(self, upstream):
+        servers = upstream.servers
 
-    def _restore_server(self, server):
-        http_client_logger.info('restoring server %s for upstream %s', server.address, self.name)
-        server.restore(self.get_join_strategy())
+        self.max_tries = upstream.max_tries
+        self.max_fails = upstream.max_fails
+        self.fail_timeout = upstream.fail_timeout
+        self.max_timeout_tries = upstream.max_timeout_tries
+        self.connect_timeout = upstream.connect_timeout
+        self.request_timeout = upstream.request_timeout
 
-    def update(self, config, servers):
-        if not servers:
-            raise ValueError('server list should not be empty')
+        self.slow_start_interval = upstream.slow_start_interval
 
-        self.max_tries = int(config.get('max_tries', options.http_client_default_max_tries))
-        self.max_fails = int(config.get('max_fails', options.http_client_default_max_fails))
-        self.fail_timeout = float(config.get('fail_timeout_sec', options.http_client_default_fail_timeout_sec))
-        self.max_timeout_tries = int(config.get('max_timeout_tries', options.http_client_default_max_timeout_tries))
-        self.connect_timeout = float(config.get('connect_timeout_sec', options.http_client_default_connect_timeout_sec))
-        self.request_timeout = float(config.get('request_timeout_sec', options.http_client_default_request_timeout_sec))
+        self.join_strategy = None
+        if self.slow_start_interval != 0:
+            self.join_strategy = DelayedSlowStartJoinStrategy(self.slow_start_interval)
 
-        slow_start_interval = float(config.get('slow_start_interval_sec', 0))
-
-        self.get_join_strategy = lambda: None
-        if slow_start_interval != 0:
-            self.get_join_strategy = partial(DelayedSlowStartJoinStrategy, slow_start_interval)
-
-        self.retry_policy = RetryPolicy(config.get('retry_policy', options.http_client_default_retry_policy))
+        self.retry_policy = upstream.retry_policy
 
         mapping = {server.address: server for server in servers}
 
@@ -274,8 +234,6 @@ class Upstream:
                 self.servers[index] = None
             else:
                 del mapping[server.address]
-                if server.is_active and server.datacenter != changed.datacenter:
-                    server.restore(self.get_join_strategy())
                 server.update(changed)
 
         for server in servers:
@@ -283,8 +241,7 @@ class Upstream:
                 self._add_server(server)
 
     def _add_server(self, server):
-        server.restore(self.get_join_strategy())
-
+        server.join_strategy = self.join_strategy
         for index, s in enumerate(self.servers):
             if s is None:
                 self.servers[index] = server
@@ -318,6 +275,22 @@ class DelayedSlowStartJoinStrategy:
             f'initial_delay_end_time={self.initial_delay_end_time}'
             ')>'
         )
+
+
+class UpstreamStore(metaclass=abc.ABCMeta):
+
+    @abc.abstractmethod
+    def get_upstream(self, host) -> Upstream:
+        pass
+
+    def get_upstreams(self) -> Dict[str, Upstream]:
+        raise NotImplementedError
+
+    def update(self, host, upstream):
+        raise NotImplementedError
+
+    def remove(self, host):
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -455,74 +428,53 @@ class BalancedHttpRequest:
             return request.get_calling_address()
 
         return ' -> '.join([f'{_get_server_address(index)}~{data.responseCode}~{data.msg}'
-                           for index, data in request.tries.items()])
+                            for index, data in request.tries.items()])
 
 
 class HttpClientFactory:
-    def __init__(self, source_app, tornado_http_client, upstreams, *, statsd_client=None, kafka_producer=None):
+    def __init__(self, source_app, tornado_http_client, *, upstream_store, statsd_client=None,
+                 kafka_producer=None):
         self.tornado_http_client = tornado_http_client
         self.source_app = source_app
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
-        self.upstreams = {}
-
-        for name, upstream in upstreams.items():
-            servers = [Server.from_config(s) for s in upstream['servers']]
-            shuffle(servers)
-            self.register_upstream(name, upstream['config'], servers)
+        self.upstream_store = upstream_store
 
     def get_http_client(self, modify_http_request_hook=None, debug_mode=False):
         return HttpClient(
             self.tornado_http_client,
             self.source_app,
-            self.upstreams,
+            self.upstream_store,
             statsd_client=self.statsd_client,
             kafka_producer=self.kafka_producer,
             modify_http_request_hook=modify_http_request_hook,
             debug_mode=debug_mode
         )
 
-    def update_upstream(self, name, config):
-        if config is None:
-            self.register_upstream(name, {}, [])
-            return
-
-        upstream_config, servers = Upstream.parse_config(config)
-        shuffle(servers)
-        self.register_upstream(name, upstream_config, servers)
-
-    def register_upstream(self, name, upstream_config, servers):
-        upstream = self.upstreams.get(name)
-
-        if not servers:
-            if upstream is not None:
-                del self.upstreams[name]
-                http_client_logger.info('delete %s upstream', name)
-            return
-
-        if upstream is None:
-            upstream = Upstream(name, upstream_config, servers)
-            self.upstreams[name] = upstream
-            http_client_logger.info('add %s upstream: %s', name, str(upstream))
-            return
-
-        upstream.update(upstream_config, servers)
-        http_client_logger.info('update %s upstream: %s', name, str(upstream))
-
 
 class HttpClient:
-    def __init__(self, http_client_impl, source_app, upstreams, *,
+    def __init__(self, http_client_impl, source_app, upstream_store, *,
                  statsd_client=None, kafka_producer=None, modify_http_request_hook=None, debug_mode=False):
         self.http_client_impl = http_client_impl
         self.source_app = source_app
         self.debug_mode = debug_mode
         self.modify_http_request_hook = modify_http_request_hook
-        self.upstreams = upstreams
+        self.upstreams = defaultdict(Upstream)
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
+        self.upstream_store = upstream_store
 
     def get_upstream(self, host):
-        return self.upstreams.get(host, Upstream.get_single_host_upstream())
+        upstream_from_store = self.upstream_store.get_upstream(host)
+        if upstream_from_store is None:
+            return Upstream.get_single_host_upstream()
+        local_upstream = self.upstreams.get(host)
+        if local_upstream is None:
+            local_upstream = upstream_from_store
+            self.upstreams[host] = local_upstream
+        else:
+            local_upstream.update(upstream_from_store)
+        return local_upstream
 
     def get_url(self, host, uri, *, name=None, data=None, headers=None, follow_redirects=True,
                 connect_timeout=None, request_timeout=None, max_timeout_tries=None,
