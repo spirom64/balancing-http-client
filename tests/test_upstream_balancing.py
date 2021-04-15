@@ -32,7 +32,7 @@ def run_simulation(upstream, requests_interval, requests, max_execution_time):
 
 
 def _upstream(weights):
-    return Upstream('upstream', {}, [Server(str(weight), weight) for weight in weights])
+    return Upstream('upstream', {}, [Server(str(weight), weight, dc='test') for weight in weights])
 
 
 class TestHttpError(unittest.TestCase):
