@@ -4,6 +4,7 @@ from tornado.options import define, options as tornado_options
 options = tornado_options
 
 define('datacenter', default=None, type=str)
+define('datacenters', default=[], type=list)
 
 define('timeout_multiplier', default=1.0, type=float)
 define('http_client_default_connect_timeout_sec', default=0.2, type=float)

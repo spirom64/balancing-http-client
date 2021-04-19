@@ -7,7 +7,7 @@ from asyncio import Future
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from functools import partial
-from random import random
+from random import random, shuffle
 
 import pycurl
 import logging
@@ -110,7 +110,7 @@ class Upstream:
 
     def __init__(self, name, config, servers):
         self.name = name
-        self.servers = servers
+        self.servers = []
         self.balanced = True
         self.max_tries = int(config.get('max_tries', options.http_client_default_max_tries))
         self.max_fails = int(config.get('max_fails', options.http_client_default_max_fails))
@@ -126,6 +126,8 @@ class Upstream:
             self.join_strategy = DelayedSlowStartJoinStrategy(self.slow_start_interval)
 
         self.retry_policy = RetryPolicy(config.get('retry_policy', {}))
+
+        self._update_servers(servers)
 
     def borrow_server(self, exclude=None):
         min_index = None
@@ -223,6 +225,9 @@ class Upstream:
 
         self.retry_policy = upstream.retry_policy
 
+        self._update_servers(servers)
+
+    def _update_servers(self, servers):
         mapping = {server.address: server for server in servers}
 
         for index, server in enumerate(self.servers):
@@ -468,6 +473,7 @@ class HttpClient:
         upstream_from_store = self.upstream_store.get_upstream(host)
         if upstream_from_store is None:
             return Upstream.get_single_host_upstream()
+        shuffle(upstream_from_store.servers)
         local_upstream = self.upstreams.get(host)
         if local_upstream is None:
             local_upstream = upstream_from_store

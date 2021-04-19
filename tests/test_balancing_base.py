@@ -1,5 +1,4 @@
-from typing import Dict
-
+import tornado
 from tornado.httpclient import AsyncHTTPClient
 from tornado.testing import AsyncHTTPTestCase
 from tornado.web import RequestHandler, Application
@@ -33,13 +32,14 @@ class BalancingClientMixin:
                                                      upstream_store=UpstreamStoreTestImpl(self.upstreams)
                                                      )
         self.balancing_client = self.http_client_factory.get_http_client()
+        tornado.options.options.datacenter = 'test'
 
     def get_upstream_config(self):
         return {'max_fails': 10, 'fail_timeout_sec': 0.1, 'request_timeout_sec': 0.5}
 
     def register_ports_for_upstream(self, *ports):
         upstream = Upstream('test', self.get_upstream_config(),
-                            [Server(f'127.0.0.1:{port}') for port in ports])
+                            [Server(f'127.0.0.1:{port}', dc='test') for port in ports])
         return self.http_client_factory.upstream_store.update('test', upstream)
 
 

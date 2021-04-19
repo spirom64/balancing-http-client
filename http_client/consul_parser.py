@@ -1,6 +1,8 @@
 import json
 import logging
 
+from http_client.util import restore_original_datacenter_name
+
 from http_client import Server
 
 from http_client.options import options
@@ -21,14 +23,15 @@ def parse_consul_health_servers_data(values):
             service_config['Address'] = f"{v['Node']['Address']}:{str(v['Service']['Port'])}"
         service_config['Weight'] = v['Service']['Weights']['Passing']
         service_config['Datacenter'] = v['Node']['Datacenter']
-        dc = service_config['Datacenter']
+
+        dc = restore_original_datacenter_name(service_config['Datacenter'])
         if options.self_node_filter_enabled and _not_same_name(node_name):
             consul_util_logger.debug(f'Self node filtering activated. Skip: {node_name}')
             continue
         servers.append(Server(
             address=service_config['Address'],
             weight=service_config['Weight'],
-            dc=service_config['Datacenter']
+            dc=dc
         ))
         service_config = {}
     return dc, servers

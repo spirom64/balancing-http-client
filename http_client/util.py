@@ -5,6 +5,7 @@ from uuid import uuid4
 from io import BytesIO
 
 from lxml import etree
+from http_client.options import options
 from tornado.escape import to_unicode, utf8
 from tornado.httpclient import HTTPResponse
 from tornado.httputil import HTTPHeaders
@@ -156,3 +157,11 @@ def xml_to_dict(xml):
         return xml.text if xml.text is not None else ''
 
     return {e.tag: xml_to_dict(e) for e in xml}
+
+
+def restore_original_datacenter_name(datacenter):
+    for dc in options.datacenters:
+        if dc.lower() == datacenter:
+            return dc
+
+    return datacenter
