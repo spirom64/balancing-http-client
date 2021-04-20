@@ -444,12 +444,14 @@ class HttpClientFactory:
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
         self.upstream_store = upstream_store
+        self.upstreams = defaultdict(Upstream)
 
     def get_http_client(self, modify_http_request_hook=None, debug_mode=False):
         return HttpClient(
             self.tornado_http_client,
             self.source_app,
             self.upstream_store,
+            self.upstreams,
             statsd_client=self.statsd_client,
             kafka_producer=self.kafka_producer,
             modify_http_request_hook=modify_http_request_hook,
@@ -458,13 +460,13 @@ class HttpClientFactory:
 
 
 class HttpClient:
-    def __init__(self, http_client_impl, source_app, upstream_store, *,
+    def __init__(self, http_client_impl, source_app, upstream_store, upstreams, *,
                  statsd_client=None, kafka_producer=None, modify_http_request_hook=None, debug_mode=False):
         self.http_client_impl = http_client_impl
         self.source_app = source_app
         self.debug_mode = debug_mode
         self.modify_http_request_hook = modify_http_request_hook
-        self.upstreams = defaultdict(Upstream)
+        self.upstreams = upstreams
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
         self.upstream_store = upstream_store
