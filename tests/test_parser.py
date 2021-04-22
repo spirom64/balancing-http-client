@@ -21,7 +21,8 @@ class TestParser(unittest.TestCase):
                                 'request_timeout_sec': '5',
                                 'connect_timeout_sec': '0.2',
                                 'max_fails': '5',
-                                'max_timeout_tries': '1'
+                                'max_timeout_tries': '1',
+                                'slow_start_interval_sec': '150'
                             }
                         }
                     }
@@ -36,6 +37,7 @@ class TestParser(unittest.TestCase):
         self.assertEqual(config['connect_timeout_sec'], '0.2')
         self.assertEqual(config['max_fails'], '5')
         self.assertEqual(config['max_timeout_tries'], '1')
+        self.assertEqual(config['slow_start_interval_sec'], '150')
 
     def test_parse_config_default_value(self):
         value = {'Value': json.dumps(

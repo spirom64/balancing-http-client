@@ -56,4 +56,7 @@ def parse_consul_upstream_config(value):
                                                         options.http_client_default_connect_timeout_sec)
     config['fail_timeout_sec'] = default_profile.get('fail_timeout_sec',
                                                      options.http_client_default_fail_timeout_sec)
+
+    config['slow_start_interval_sec'] = default_profile.get('slow_start_interval_sec', 0)
+
     return config
