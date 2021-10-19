@@ -1,6 +1,9 @@
 import abc
 import asyncio
-import json
+try:
+    import ujson as json
+except ImportError:
+    import json
 import re
 import time
 from asyncio import Future
