@@ -777,6 +777,7 @@ class RequestResult:
 
 
 def _parse_response(response, parser, response_type):
+    http_client_logger.info(json)
     try:
         return parser(response.body)
     except Exception:
