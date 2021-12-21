@@ -129,6 +129,8 @@ class Upstream:
             self.join_strategy = DelayedSlowStartJoinStrategy(self.slow_start_interval)
 
         self.retry_policy = RetryPolicy(config.get('retry_policy', {}))
+        trues = ('true', 'True', '1', True)
+        self.session_required = config.get('session_required', options.http_client_default_session_required) in trues
 
         self._update_servers(servers)
 
@@ -227,6 +229,7 @@ class Upstream:
             self.join_strategy = DelayedSlowStartJoinStrategy(self.slow_start_interval)
 
         self.retry_policy = upstream.retry_policy
+        self.session_required = upstream.session_required
 
         self._update_servers(servers)
 
@@ -333,6 +336,8 @@ class BalancedHttpRequest:
             self.request_timeout = self.upstream.request_timeout
         if max_timeout_tries is None:
             max_timeout_tries = self.upstream.max_timeout_tries
+
+        self.session_required = self.upstream.session_required
 
         self.connect_timeout *= options.timeout_multiplier
         self.request_timeout *= options.timeout_multiplier
