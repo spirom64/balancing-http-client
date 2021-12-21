@@ -135,3 +135,15 @@ class TestHttpClientBalancer(unittest.TestCase):
 
         self.assertIsNotNone(upstream.servers[0].join_strategy)
         self.assertIsNotNone(upstream.servers[1].join_strategy)
+
+    def test_session_required_true(self):
+        servers = [Server('1', 1, dc='test'), Server('2', 1, dc='test')]
+        upstream = Upstream('upstream', {'session_required': 'true'}, servers)
+
+        self.assertEqual(upstream.session_required, True)
+
+    def test_session_required_false(self):
+        servers = [Server('1', 1, dc='test'), Server('2', 1, dc='test')]
+        upstream = Upstream('upstream', {}, servers)
+
+        self.assertEqual(upstream.session_required, False)
