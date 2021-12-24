@@ -1,3 +1,5 @@
+from functools import partial
+
 import tornado
 from tornado.httpclient import AsyncHTTPClient
 from tornado.testing import AsyncHTTPTestCase
@@ -32,6 +34,7 @@ class BalancingClientMixin:
                                                      upstream_store=UpstreamStoreTestImpl(self.upstreams)
                                                      )
         self.balancing_client = self.http_client_factory.get_http_client()
+        self.balancing_client.get_upstream = partial(get_upstream, self.balancing_client)
         tornado.options.options.datacenter = 'test'
 
     def get_upstream_config(self):
@@ -52,3 +55,7 @@ class UpstreamStoreTestImpl(UpstreamStore):
 
     def update(self, host, upstream):
         self.upstreams[host] = upstream
+
+
+def get_upstream(client, host):
+    return client.upstream_store.get_upstream(host)

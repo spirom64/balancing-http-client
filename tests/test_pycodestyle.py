@@ -4,7 +4,7 @@ import unittest
 
 import pycodestyle
 
-from . import ROOT
+from tests import ROOT
 
 
 class TestPycodestyle(unittest.TestCase):

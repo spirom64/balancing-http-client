@@ -29,7 +29,7 @@ setup(
     ],
     python_requires='>=3.6',
     install_requires=[
-        'tornado >= 5.0, < 6.0',
+        'tornado >= 5.0',
         'pycurl >= 7.43.0',
         'lxml >= 3.5.0',
     ],

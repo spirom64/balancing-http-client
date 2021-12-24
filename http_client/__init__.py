@@ -22,6 +22,11 @@ from tornado.httpclient import HTTPRequest, HTTPResponse, HTTPError
 from tornado.httputil import HTTPHeaders
 from typing import Dict
 
+try:
+    from tornado.stack_context import wrap
+except ImportError:
+    wrap = lambda f: f
+
 from http_client.options import options
 
 from http_client.util import make_url, make_body, make_mfd, response_from_debug
@@ -388,6 +393,9 @@ class BalancedHttpRequest:
             request_timeout=self.request_timeout,
         )
 
+        request.upstream_name = self.upstream.name if self.upstream.balanced else self.current_host
+        request.upstream_datacenter = self.current_datacenter
+
         if options.http_proxy_host is not None:
             request.proxy_host = options.http_proxy_host
             request.proxy_port = options.http_proxy_port
@@ -566,7 +574,7 @@ class HttpClient:
             result = RequestResult(balanced_request, response, parse_response, parse_on_error)
 
             if callable(callback):
-                callback(result.data, result.response)
+                wrap(callback)(result.data, result.response)
 
             if fail_fast and result.failed:
                 future.set_exception(FailFastError(result))
@@ -574,10 +582,16 @@ class HttpClient:
 
             future.set_result(result)
 
-        def retry_callback(response):
-            if isinstance(response.error, Exception) and not isinstance(response.error, HTTPError):
-                future.set_exception(response.error)
-                return
+        def retry_callback(response_future):
+            exc = response_future.exception()
+            if isinstance(exc, Exception):
+                if isinstance(exc, HTTPError):
+                    response = exc.response
+                else:
+                    future.set_exception(exc)
+                    return
+            else:
+                response = response_future.result()
 
             request = balanced_request.pop_last_request()
             retries_count = len(balanced_request.tries)
@@ -589,34 +603,34 @@ class HttpClient:
             self._log_response(balanced_request, response, retries_count, do_retry, debug_extra)
 
             if do_retry:
-                self._fetch(balanced_request, retry_callback)
+                IOLoop.current().add_future(self._fetch(balanced_request), retry_callback)
                 return
 
             request_finished_callback(response)
 
         if callable(self.modify_http_request_hook):
             self.modify_http_request_hook(balanced_request)
-        self._fetch(balanced_request, retry_callback)
+        IOLoop.current().add_future(self._fetch(balanced_request), retry_callback)
 
         return future
 
-    def _fetch(self, balanced_request, callback):
+    def _fetch(self, balanced_request):
         request = balanced_request.make_request()
 
         if not balanced_request.backend_available():
-            response = HTTPResponse(
+            future = Future()
+            future.set_result(HTTPResponse(
                 request, 502, error=HTTPError(502, 'No backend available for ' + balanced_request.get_host()),
                 request_time=0
-            )
-            IOLoop.current().add_callback(callback, response)
-            return
+            ))
+            return future
 
         if isinstance(self.http_client_impl, CurlAsyncHTTPClient):
             request.prepare_curl_callback = partial(
                 self._prepare_curl_callback, next_callback=request.prepare_curl_callback
             )
 
-        self.http_client_impl.fetch(request, callback, raise_error=False)
+        return self.http_client_impl.fetch(request)
 
     @staticmethod
     def _prepare_curl_callback(curl, next_callback):

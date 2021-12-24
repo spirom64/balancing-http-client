@@ -12,7 +12,6 @@ def exceptionally_server(sock):
         try:
             client_sock, client_addr = sock.accept()
             client_sock.recv(4)
-            print('read')
             raise Exception()
         except OSError:
             pass
