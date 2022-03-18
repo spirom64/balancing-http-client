@@ -3,6 +3,7 @@ import unittest
 
 import tornado
 
+from http_client import Upstream
 from http_client.options import options
 from http_client.consul_parser import parse_consul_upstream_config, parse_consul_health_servers_data
 
@@ -142,3 +143,36 @@ class TestParser(unittest.TestCase):
         dc, servers = parse_consul_health_servers_data(value)
 
         self.assertEqual(len(servers), 0)
+
+    def test_parse_retry_policy(self):
+        value = {
+            'Value': """{
+                "hosts":{
+                    "default":{
+                        "profiles":{
+                            "default":{
+                                "max_timeout_tries":"2",
+                                "request_timeout_sec":"2",
+                                "connect_timeout_sec":"0.1",
+                                "max_fails":"5",
+                                "retry_policy":{
+                                    "503":{
+                                        "idempotent":"true"
+                                    },
+                                    "599":{
+                                        "idempotent":"false"
+                                    }
+                                },
+                                "fail_timeout_sec":"2",
+                                "max_tries":"3"
+                            }
+                        }
+                    }
+                }
+            }"""
+        }
+
+        config = parse_consul_upstream_config(value)
+
+        upstream = Upstream('some_upstream', config, [])
+        self.assertEqual(upstream.retry_policy.statuses, {503: True, 599: False})

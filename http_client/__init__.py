@@ -87,8 +87,8 @@ class RetryPolicy:
     def __init__(self, properties):
         self.statuses = {}
         if properties:
-            for statuses in properties.items():
-                self.statuses[int(statuses[0])] = bool(statuses[1].get('idempotent', False))
+            for status, config in properties.items():
+                self.statuses[int(status)] = config.get('idempotent', 'false') == 'true'
         else:
             self.statuses = options.http_client_default_retry_policy
 
