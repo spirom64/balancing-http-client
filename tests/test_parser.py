@@ -18,10 +18,8 @@ class TestParser(unittest.TestCase):
                         'profiles': {
                             'default': {
                                 'max_tries': '3',
-                                'fail_timeout_sec': '1',
                                 'request_timeout_sec': '5',
                                 'connect_timeout_sec': '0.2',
-                                'max_fails': '5',
                                 'max_timeout_tries': '1',
                                 'slow_start_interval_sec': '150',
                                 'session_required': 'true',
@@ -34,10 +32,8 @@ class TestParser(unittest.TestCase):
         config = parse_consul_upstream_config(value)
 
         self.assertEqual(config['max_tries'], '3')
-        self.assertEqual(config['fail_timeout_sec'], '1')
         self.assertEqual(config['request_timeout_sec'], '5')
         self.assertEqual(config['connect_timeout_sec'], '0.2')
-        self.assertEqual(config['max_fails'], '5')
         self.assertEqual(config['max_timeout_tries'], '1')
         self.assertEqual(config['slow_start_interval_sec'], '150')
         self.assertEqual(config['session_required'], 'true')
@@ -59,7 +55,6 @@ class TestParser(unittest.TestCase):
         config = parse_consul_upstream_config(value)
 
         self.assertEqual(config['max_tries'], '3')
-        self.assertEqual(config['fail_timeout_sec'], options.http_client_default_fail_timeout_sec)
         self.assertEqual(config['session_required'], options.http_client_default_session_required)
 
     def test_parse_health_service(self):
@@ -154,7 +149,6 @@ class TestParser(unittest.TestCase):
                                 "max_timeout_tries":"2",
                                 "request_timeout_sec":"2",
                                 "connect_timeout_sec":"0.1",
-                                "max_fails":"5",
                                 "retry_policy":{
                                     "503":{
                                         "idempotent":"true"
@@ -163,7 +157,6 @@ class TestParser(unittest.TestCase):
                                         "idempotent":"false"
                                     }
                                 },
-                                "fail_timeout_sec":"2",
                                 "max_tries":"3"
                             }
                         }

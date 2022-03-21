@@ -121,8 +121,6 @@ class Upstream:
         self.servers = []
         self.balanced = True
         self.max_tries = int(config.get('max_tries', options.http_client_default_max_tries))
-        self.max_fails = int(config.get('max_fails', options.http_client_default_max_fails))
-        self.fail_timeout = float(config.get('fail_timeout_sec', options.http_client_default_fail_timeout_sec))
         self.max_timeout_tries = int(config.get('max_timeout_tries', options.http_client_default_max_timeout_tries))
         self.connect_timeout = float(config.get('connect_timeout_sec', options.http_client_default_connect_timeout_sec))
         self.request_timeout = float(config.get('request_timeout_sec', options.http_client_default_request_timeout_sec))
@@ -221,8 +219,6 @@ class Upstream:
         servers = upstream.servers
 
         self.max_tries = upstream.max_tries
-        self.max_fails = upstream.max_fails
-        self.fail_timeout = upstream.fail_timeout
         self.max_timeout_tries = upstream.max_timeout_tries
         self.connect_timeout = upstream.connect_timeout
         self.request_timeout = upstream.request_timeout

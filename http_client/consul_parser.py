@@ -45,7 +45,6 @@ def parse_consul_upstream_config(value):
     config = {}
     values = json.loads(value['Value'])
     default_profile = values['hosts']['default']['profiles']['default']
-    config['max_fails'] = default_profile.get('max_fails', options.http_client_default_max_fails)
     config['retry_policy'] = default_profile.get('retry_policy', {})
     config['request_timeout_sec'] = default_profile.get('request_timeout_sec',
                                                         options.http_client_default_request_timeout_sec)
@@ -54,8 +53,6 @@ def parse_consul_upstream_config(value):
     config['max_tries'] = default_profile.get('max_tries', options.http_client_default_max_tries)
     config['connect_timeout_sec'] = default_profile.get('connect_timeout_sec',
                                                         options.http_client_default_connect_timeout_sec)
-    config['fail_timeout_sec'] = default_profile.get('fail_timeout_sec',
-                                                     options.http_client_default_fail_timeout_sec)
 
     config['slow_start_interval_sec'] = default_profile.get('slow_start_interval_sec', 0)
     config['session_required'] = default_profile.get('session_required', options.http_client_default_session_required)

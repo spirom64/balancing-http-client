@@ -38,7 +38,7 @@ class BalancingClientMixin:
         tornado.options.options.datacenter = 'test'
 
     def get_upstream_config(self):
-        return {'max_fails': 10, 'fail_timeout_sec': 0.1, 'request_timeout_sec': 0.5}
+        return {'request_timeout_sec': 0.5}
 
     def register_ports_for_upstream(self, *ports):
         upstream = Upstream('test', self.get_upstream_config(),
