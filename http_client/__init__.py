@@ -62,7 +62,6 @@ class Server:
         self.datacenter = dc
 
         self.current_requests = 0
-        self.fails = 0
         self.requests = 0
         self.join_strategy = None
 
@@ -96,12 +95,12 @@ class RetryPolicy:
         if response.code == 599:
             error = str(response.error)
             if error.startswith('HTTP 599: Failed to connect') or error.startswith('HTTP 599: Connection timed out'):
-                return True, True
+                return True
 
         if response.code not in self.statuses:
-            return False, False
+            return False
 
-        return idempotent or self.statuses.get(response.code), True
+        return idempotent or self.statuses.get(response.code)
 
 
 class Upstream:
@@ -204,16 +203,11 @@ class Upstream:
 
         return min_index, server.address, server.rack, server.datacenter
 
-    def return_server(self, index, error=False):
+    def return_server(self, index):
         server = self.servers[index]
         if server is not None:
             if server.current_requests > 0:
                 server.current_requests -= 1
-
-            if error:
-                server.fails += 1
-            else:
-                server.fails = 0
 
     def update(self, upstream):
         servers = upstream.servers
@@ -412,12 +406,12 @@ class BalancedHttpRequest:
         self.request_time_left -= response.request_time
 
         if self.upstream.balanced:
-            do_retry, error = self.upstream.retry_policy.check_retry(response, self.idempotent)
+            do_retry = self.upstream.retry_policy.check_retry(response, self.idempotent)
 
             if self.current_server_index is not None:
-                self.upstream.return_server(self.current_server_index, error)
+                self.upstream.return_server(self.current_server_index)
         else:
-            do_retry, error = False, False
+            do_retry = False
 
         do_retry = do_retry and self.upstream.max_tries > len(self.tries) and self.request_time_left > 0
         return do_retry

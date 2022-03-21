@@ -25,7 +25,7 @@ def run_simulation(upstream, requests_interval, requests, max_execution_time):
                 done[fd] = done[fd] + 1
                 mapping[index] = fd
             else:
-                upstream.return_server(mapping[index], False)
+                upstream.return_server(mapping[index])
                 del mapping[index]
 
     return done
