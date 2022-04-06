@@ -1,4 +1,3 @@
-import abc
 import asyncio
 try:
     import ujson as json
@@ -7,7 +6,7 @@ except ImportError:
 import re
 import time
 from asyncio import Future
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import partial
 from random import random, shuffle
@@ -20,7 +19,6 @@ from tornado.ioloop import IOLoop
 from tornado.curl_httpclient import CurlAsyncHTTPClient
 from tornado.httpclient import HTTPRequest, HTTPResponse, HTTPError
 from tornado.httputil import HTTPHeaders
-from typing import Dict
 
 try:
     from tornado.stack_context import wrap
@@ -283,22 +281,6 @@ class DelayedSlowStartJoinStrategy:
         )
 
 
-class UpstreamStore(metaclass=abc.ABCMeta):
-
-    @abc.abstractmethod
-    def get_upstream(self, host) -> Upstream:
-        pass
-
-    def get_upstreams(self) -> Dict[str, Upstream]:
-        raise NotImplementedError
-
-    def update(self, host, upstream):
-        raise NotImplementedError
-
-    def remove(self, host):
-        raise NotImplementedError
-
-
 @dataclass(frozen=True)
 class ResponseData:
     responseCode: int
@@ -443,20 +425,17 @@ class BalancedHttpRequest:
 
 
 class HttpClientFactory:
-    def __init__(self, source_app, tornado_http_client, *, upstream_store, statsd_client=None,
-                 kafka_producer=None):
+    def __init__(self, source_app, tornado_http_client, *, upstreams=None, statsd_client=None, kafka_producer=None):
         self.tornado_http_client = tornado_http_client
         self.source_app = source_app
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
-        self.upstream_store = upstream_store
-        self.upstreams = defaultdict(Upstream)
+        self.upstreams = {} if upstreams is None else upstreams
 
     def get_http_client(self, modify_http_request_hook=None, debug_mode=False):
         return HttpClient(
             self.tornado_http_client,
             self.source_app,
-            self.upstream_store,
             self.upstreams,
             statsd_client=self.statsd_client,
             kafka_producer=self.kafka_producer,
@@ -464,9 +443,21 @@ class HttpClientFactory:
             debug_mode=debug_mode
         )
 
+    def update_upstream(self, upstream):
+        current_upstream = self.upstreams.get(upstream.name)
+
+        if current_upstream is None:
+            shuffle(upstream.servers)
+            self.upstreams[upstream.name] = upstream
+            http_client_logger.debug('add %s upstream: %s', upstream.name, str(upstream))
+            return
+
+        current_upstream.update(upstream)
+        http_client_logger.debug('update %s upstream: %s', upstream.name, str(upstream))
+
 
 class HttpClient:
-    def __init__(self, http_client_impl, source_app, upstream_store, upstreams, *,
+    def __init__(self, http_client_impl, source_app, upstreams, *,
                  statsd_client=None, kafka_producer=None, modify_http_request_hook=None, debug_mode=False):
         self.http_client_impl = http_client_impl
         self.source_app = source_app
@@ -475,20 +466,9 @@ class HttpClient:
         self.upstreams = upstreams
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
-        self.upstream_store = upstream_store
 
     def get_upstream(self, host):
-        upstream_from_store = self.upstream_store.get_upstream(host)
-        if upstream_from_store is None:
-            return Upstream.get_single_host_upstream()
-        shuffle(upstream_from_store.servers)
-        local_upstream = self.upstreams.get(host)
-        if local_upstream is None:
-            local_upstream = upstream_from_store
-            self.upstreams[host] = local_upstream
-        else:
-            local_upstream.update(upstream_from_store)
-        return local_upstream
+        return self.upstreams.get(host, Upstream.get_single_host_upstream())
 
     def get_url(self, host, uri, *, name=None, data=None, headers=None, follow_redirects=True,
                 connect_timeout=None, request_timeout=None, max_timeout_tries=None,
