@@ -697,6 +697,8 @@ class RequestResult:
         'name', 'request', 'response', 'parse_on_error', 'parse_response', '_content_type', '_data', '_data_parse_error'
     )
 
+    _args = ('request', 'response', 'parse_response', 'parse_on_error')
+
     def __init__(self, request: BalancedHttpRequest, response: HTTPResponse,
                  parse_response: bool, parse_on_error: bool):
         self.name = request.name
@@ -708,6 +710,10 @@ class RequestResult:
         self._content_type = None
         self._data = None
         self._data_parse_error = None
+
+    def __repr__(self):
+        args = ', '.join(f'{a}={repr(getattr(self, a))}' for a in self._args)
+        return f'{self.__class__.__name__}({args})'
 
     def _parse_data(self):
         if self._data is not None or self._data_parse_error is not None:
