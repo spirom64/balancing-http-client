@@ -37,4 +37,4 @@ class BalancingClientMixin:
     def register_ports_for_upstream(self, *ports):
         upstream = Upstream('test', self.get_upstream_config(),
                             [Server(f'127.0.0.1:{port}', dc='test') for port in ports])
-        return self.http_client_factory.update_upstream(upstream)
+        self.http_client_factory.upstreams[upstream.name] = upstream
