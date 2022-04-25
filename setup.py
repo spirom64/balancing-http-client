@@ -32,12 +32,14 @@ setup(
         'tornado >= 5.1',
         'pycurl >= 7.43.0',
         'lxml >= 3.5.0',
+        'dataclasses >= 0.8',
     ],
     test_suite='tests',
     tests_require=[
         'pytest <= 3.8.2',
         'pycodestyle == 2.5.0',
         'tornado >= 5.1',
+        'dataclasses >= 0.8',
     ],
     zip_safe=False
 )

@@ -463,9 +463,22 @@ class HttpClient:
         self.source_app = source_app
         self.debug_mode = debug_mode
         self.modify_http_request_hook = modify_http_request_hook
-        self.upstreams = upstreams
+        self.upstreams = self.process_upstreams(upstreams)
         self.statsd_client = statsd_client
         self.kafka_producer = kafka_producer
+
+    @staticmethod
+    def process_upstreams(upstreams):
+        processed_upstreams = {}
+        for upstream_name, upstream in upstreams.items():
+            if isinstance(upstream, Upstream):
+                processed_upstreams[upstream_name] = upstream
+                continue
+            processed_servers = []
+            for server in upstream.get('servers', []):
+                processed_servers.append(Server(server.get('server', '')))
+            processed_upstreams[upstream_name] = Upstream(upstream_name, upstream.get('config', {}), processed_servers)
+        return processed_upstreams
 
     def get_upstream(self, host):
         return self.upstreams.get(host, Upstream.get_single_host_upstream())
